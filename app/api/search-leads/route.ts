@@ -54,9 +54,12 @@ export async function POST(request: NextRequest) {
       Promise.allSettled(globalWeb),
     ])
 
+    // Collect all errors so we can surface them if nothing comes back
+    const allErrors: string[] = []
+
     // Process Maps
     for (const res of mapsResults) {
-      if (res.status !== 'fulfilled') continue
+      if (res.status === 'rejected') { allErrors.push(String(res.reason)); continue }
       for (const place of res.value.places || []) {
         if (!place.title) continue
         add({ name: place.title, website: place.website, phone: place.phone, address: place.address, snippet: place.category, source: 'maps' })
@@ -65,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     // Process web results
     for (const res of [...localResults, ...globalResults]) {
-      if (res.status !== 'fulfilled') continue
+      if (res.status === 'rejected') { allErrors.push(String(res.reason)); continue }
       for (const item of res.value.organic || []) {
         if (!item.link || shouldSkip(item.link)) continue
         const name = item.title.replace(/\s*[-|–·]\s*.+$/, '').trim()
@@ -75,10 +78,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (pool.length === 0) {
-      return NextResponse.json(
-        { error: 'Serper returned no results. Check your SERPER_API_KEY in Vercel env vars and make sure it has remaining quota.' },
-        { status: 422 }
-      )
+      // Surface the actual Serper error if we got one
+      const firstError = allErrors[0] || 'Serper returned no results'
+      return NextResponse.json({ error: firstError }, { status: 422 })
     }
 
     // Maps leads first (local, highest intent), then web

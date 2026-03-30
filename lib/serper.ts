@@ -1,20 +1,27 @@
 const SERPER_BASE = 'https://google.serper.dev'
 
 async function serperRequest(endpoint: string, body: object) {
+  const key = process.env.SERPER_API_KEY
+  if (!key) throw new Error('SERPER_API_KEY environment variable is not set')
+
   const response = await fetch(`${SERPER_BASE}${endpoint}`, {
     method: 'POST',
     headers: {
-      'X-API-KEY': process.env.SERPER_API_KEY!,
+      'X-API-KEY': key,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
   })
 
+  const data = await response.json()
+
   if (!response.ok) {
-    throw new Error(`Serper error ${response.status}`)
+    // Surface the actual Serper error message (e.g. "Invalid API key", "Quota exceeded")
+    const msg = data?.message || data?.error || `HTTP ${response.status}`
+    throw new Error(`Serper: ${msg}`)
   }
 
-  return response.json()
+  return data
 }
 
 export interface SerperOrganicResult {
@@ -37,17 +44,13 @@ export interface SerperPlace {
   rating?: number
   reviewsCount?: number
   category?: string
-  cid?: string
 }
 
 export interface SerperPlacesResponse {
   places: SerperPlace[]
 }
 
-export async function serperSearch(
-  query: string,
-  num = 10
-): Promise<SerperSearchResponse> {
+export async function serperSearch(query: string, num = 10): Promise<SerperSearchResponse> {
   return serperRequest('/search', { q: query, num })
 }
 
@@ -56,12 +59,15 @@ export async function serperPlaces(
   location?: string,
   num = 20
 ): Promise<SerperPlacesResponse> {
-  const q = location ? `${query} near ${location}` : query
-  return serperRequest('/places', { q, num })
+  // Pass location as a separate field, not embedded in the query string
+  const body: Record<string, unknown> = { q: query, num }
+  if (location) body.location = location
+  return serperRequest('/places', body)
 }
 
-export async function serperNews(query: string, num = 5): Promise<{
-  news: Array<{ title: string; snippet: string; date?: string }>
-}> {
+export async function serperNews(
+  query: string,
+  num = 5
+): Promise<{ news: Array<{ title: string; snippet: string; date?: string }> }> {
   return serperRequest('/news', { q: query, num })
 }
