@@ -47,8 +47,9 @@ export default function Home() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: params.type, value: params.value }),
         })
-        if (!analyzeRes.ok) throw new Error('Failed to analyze your business.')
-        const { profile }: { profile: BusinessProfile } = await analyzeRes.json()
+        const analyzeData = await analyzeRes.json()
+        if (!analyzeRes.ok) throw new Error(analyzeData?.error || 'Analyze step failed — check your DEEPSEEK_API_KEY in Vercel.')
+        const { profile }: { profile: BusinessProfile } = analyzeData
 
         // ── Step 2: Search ───────────────────────────────────────────────
         setAppStep('searching')
@@ -56,18 +57,17 @@ export default function Home() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            searchQueries: profile.searchQueries,
-            mapsQueries: profile.mapsQueries,
             location: params.location,
             businessProfile: profile,
           }),
         })
-        if (!searchRes.ok) throw new Error('Failed to search for leads.')
-        const { leads: rawLeads } = await searchRes.json()
+        const searchData = await searchRes.json()
+        if (!searchRes.ok) throw new Error(searchData?.error || 'Search step failed — check your SERPER_API_KEY in Vercel.')
+        const { leads: rawLeads } = searchData
 
         if (!rawLeads || rawLeads.length === 0) {
           setAppStep('error')
-          setErrorMsg('No leads found. Try a broader description or remove the location filter.')
+          setErrorMsg('Serper returned 0 results. Your API key may be missing quota, or check it in Vercel → Settings → Environment Variables.')
           return
         }
 
@@ -325,8 +325,16 @@ export default function Home() {
                         border: '1px solid rgba(239,68,68,0.15)',
                       }}
                     >
-                      <p className="text-red-400 font-medium mb-2">Search Failed</p>
-                      <p className="text-zinc-500 text-sm mb-6">{errorMsg}</p>
+                      <p className="text-red-400 font-medium mb-2">Something went wrong</p>
+                      <p className="text-zinc-400 text-sm mb-4 leading-relaxed">{errorMsg}</p>
+                      <a
+                        href="/api/debug"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-xs text-zinc-600 hover:text-zinc-400 transition-colors mb-5"
+                      >
+                        → Open /api/debug to check API key status
+                      </a>
                       <button
                         onClick={reset}
                         className="flex items-center gap-2 mx-auto text-sm text-zinc-300 hover:text-white transition-colors"
