@@ -65,7 +65,9 @@ export default function Home() {
         const { leads: rawLeads } = await searchRes.json()
 
         if (!rawLeads || rawLeads.length === 0) {
-          throw new Error('No leads found. Try broadening your search or changing the location.')
+          setAppStep('done')
+          setErrorMsg('No leads found for this search. Try a different description or remove the location filter.')
+          return
         }
 
         // Seed placeholder cards immediately so the user sees something
