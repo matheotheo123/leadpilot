@@ -4,7 +4,7 @@ import { crawlWebsite } from '@/lib/crawler'
 import { serperSearch } from '@/lib/serper'
 import type { EnrichedLead, BusinessProfile, PainSignal } from '@/types'
 
-export const maxDuration = 30
+export const maxDuration = 45
 
 interface EnrichResponse {
   score: number

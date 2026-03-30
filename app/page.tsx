@@ -59,14 +59,15 @@ export default function Home() {
             searchQueries: profile.searchQueries,
             mapsQueries: profile.mapsQueries,
             location: params.location,
+            businessProfile: profile,
           }),
         })
         if (!searchRes.ok) throw new Error('Failed to search for leads.')
         const { leads: rawLeads } = await searchRes.json()
 
         if (!rawLeads || rawLeads.length === 0) {
-          setAppStep('done')
-          setErrorMsg('No leads found for this search. Try a different description or remove the location filter.')
+          setAppStep('error')
+          setErrorMsg('No leads found. Try a broader description or remove the location filter.')
           return
         }
 
@@ -283,7 +284,7 @@ export default function Home() {
 
           {/* ── Loading / Results ─────────────────────────────────── */}
           <AnimatePresence>
-            {(isLoading || showResults || appStep === 'error') && (
+            {(isLoading || showResults || appStep === 'error' || appStep === 'done') && (
               <motion.div
                 key="results"
                 initial={{ opacity: 0 }}
@@ -311,7 +312,7 @@ export default function Home() {
                 )}
 
                 {/* Error */}
-                {appStep === 'error' && errorMsg && (
+                {(appStep === 'error' || (appStep === 'done' && !showResults)) && errorMsg && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.97 }}
                     animate={{ opacity: 1, scale: 1 }}
