@@ -5,76 +5,54 @@ import type { BusinessProfile } from '@/types'
 
 export const maxDuration = 30
 
+interface AnalysisResult {
+  description: string
+  sells: string[]
+  painPoints: string[]
+  targets: string[]
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { type, value } = await request.json()
 
-    let businessContext = value
+    let input = value as string
 
     if (type === 'url') {
       const crawled = await crawlWebsite(value)
       if (crawled) {
-        businessContext = [
-          `URL: ${value}`,
-          `Title: ${crawled.title}`,
-          `Description: ${crawled.description}`,
-          `Headlines: ${crawled.h1s.join(' | ')}`,
-          `Content: ${crawled.bodyText.slice(0, 2000)}`,
-        ].join('\n')
+        input = `${crawled.title}. ${crawled.description}. ${crawled.h1s.join('. ')}. ${crawled.bodyText.slice(0, 1500)}`
       }
     }
 
-    const profile = await deepseekJSON<BusinessProfile>(
-      `You are a B2B sales expert who understands how to find companies that need specific services.`,
+    // Simple, focused ask: understand the business + identify what types of companies to target
+    const result = await deepseekJSON<AnalysisResult>(
+      'You are a B2B sales expert.',
+      `Someone describes their business as: "${input}"
 
-      `Read this business description carefully and return a JSON object.
-
-BUSINESS:
-${businessContext}
-
-Return this exact JSON structure:
-
+Understand what they sell and who their buyers are. Return this JSON:
 {
-  "name": null,
-  "description": "one sentence summary of what this business sells",
-  "sells": ["service or product 1", "service or product 2"],
-  "idealCustomer": "one sentence describing the ideal buyer",
-  "painPoints": ["pain point 1", "pain point 2", "pain point 3"],
-  "industries": ["industry 1", "industry 2", "industry 3"],
-  "searchQueries": [
-    "technology companies",
-    "software startups",
-    "SaaS businesses",
-    "IT consulting firms",
-    "digital agency",
-    "engineering company",
-    "cloud services company",
-    "enterprise software company"
-  ],
-  "mapsQueries": [
-    "software company",
-    "technology startup",
-    "IT company",
-    "digital agency"
-  ]
+  "description": "one sentence: what they sell",
+  "sells": ["service 1", "service 2"],
+  "painPoints": ["problem they solve 1", "problem they solve 2", "problem they solve 3"],
+  "targets": ["type of company 1", "type of company 2", "type of company 3", "type of company 4", "type of company 5", "type of company 6"]
 }
 
-IMPORTANT FOR searchQueries: Replace the 8 example strings above with 8 REAL search terms specific to finding BUYERS of this service. These must be short phrases like "software company", "healthcare startup", "logistics company", "B2B SaaS" — simple company-type terms that Google will use to find company websites. DO NOT use site: operators. DO NOT use long sentences. DO NOT add location (location is added separately). Keep each query under 6 words.
-
-IMPORTANT FOR mapsQueries: Replace the 4 example strings with 4 short business category terms for Google Maps like "software company" or "tech startup". Under 4 words each.`
+For targets: list 6 short company type labels (2-4 words each) that describe businesses who would HIRE this service. Examples of good target labels: "tech startup", "SaaS company", "healthcare clinic", "law firm", "e-commerce brand", "logistics company". Pick types relevant to what was described.`
     )
 
-    // Sanitize — strip any site: operators or long queries DeepSeek sneaks in
-    const clean = (q: string) =>
-      q.replace(/site:\S+/gi, '').replace(/\s+/g, ' ').trim().slice(0, 60)
-
-    profile.searchQueries = Array.isArray(profile.searchQueries)
-      ? profile.searchQueries.map(clean).filter((q) => q.length > 2).slice(0, 8)
-      : ['software company', 'technology startup', 'SaaS company']
-
-    profile.mapsQueries = Array.isArray(profile.mapsQueries)
-      ? profile.mapsQueries.map(clean).filter((q) => q.length > 2).slice(0, 5)
-      : ['software company', 'tech startup', 'IT company']
+    const profile: BusinessProfile = {
+      description: result.description || input.slice(0, 100),
+      sells: Array.isArray(result.sells) ? result.sells : [input.slice(0, 60)],
+      painPoints: Array.isArray(result.painPoints) ? result.painPoints : [],
+      targets: Array.isArray(result.targets) && result.targets.length > 0
+        ? result.targets.slice(0, 6)
+        : ['technology company', 'software startup', 'SaaS company', 'IT firm', 'digital agency', 'enterprise company'],
+      idealCustomer: result.targets?.[0] || 'growing businesses',
+      industries: [],
+      searchQueries: [],
+      mapsQueries: [],
+    }
 
     return NextResponse.json({ profile })
   } catch (error) {
