@@ -2,369 +2,250 @@
 
 import { useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Zap, RotateCcw, TrendingUp, MapPin, Globe } from 'lucide-react'
+import { Zap, RotateCcw, ExternalLink } from 'lucide-react'
 import AnimatedBackground from '@/components/AnimatedBackground'
 import SearchPanel from '@/components/SearchPanel'
 import StepIndicator from '@/components/StepIndicator'
 import LeadGrid from '@/components/LeadGrid'
 import type { EnrichedLead, BusinessProfile } from '@/types'
 
-type AppStep = 'idle' | 'analyzing' | 'searching' | 'enriching' | 'done' | 'error'
+type Step = 'idle' | 'analyzing' | 'searching' | 'enriching' | 'done' | 'error'
 
-const STEP_INDEX: Record<AppStep, number> = {
-  idle: -1,
-  analyzing: 0,
-  searching: 1,
-  enriching: 2,
-  done: 3,
-  error: -1,
+const STEP_INDEX: Record<Step, number> = {
+  idle: -1, analyzing: 0, searching: 1, enriching: 2, done: 3, error: -1,
 }
 
 export default function Home() {
-  const [appStep, setAppStep] = useState<AppStep>('idle')
-  const [leads, setLeads] = useState<EnrichedLead[]>([])
-  const [enrichedCount, setEnrichedCount] = useState(0)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [step, setStep]               = useState<Step>('idle')
+  const [leads, setLeads]             = useState<EnrichedLead[]>([])
+  const [enrichedCount, setEnriched]  = useState(0)
+  const [error, setError]             = useState<string | null>(null)
 
-  const reset = () => {
-    setAppStep('idle')
-    setLeads([])
-    setEnrichedCount(0)
-    setErrorMsg(null)
-  }
+  const reset = () => { setStep('idle'); setLeads([]); setEnriched(0); setError(null) }
 
-  const handleSearch = useCallback(
-    async (params: { type: 'description' | 'url'; value: string; location: string }) => {
-      setAppStep('analyzing')
-      setLeads([])
-      setEnrichedCount(0)
-      setErrorMsg(null)
+  const handleSearch = useCallback(async (
+    params: { type: 'description' | 'url'; value: string; location: string }
+  ) => {
+    setStep('analyzing'); setLeads([]); setEnriched(0); setError(null)
 
-      try {
-        // ── Step 1: Analyze ──────────────────────────────────────────────
-        const analyzeRes = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: params.type, value: params.value }),
-        })
-        const analyzeData = await analyzeRes.json()
-        if (!analyzeRes.ok) throw new Error(analyzeData?.error || 'Analyze step failed — check your DEEPSEEK_API_KEY in Vercel.')
-        const { profile }: { profile: BusinessProfile } = analyzeData
+    try {
+      // 1 — Analyze
+      const ar = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: params.type, value: params.value }),
+      })
+      const ad = await ar.json()
+      if (!ar.ok) throw new Error(ad?.error || 'Analysis failed — check DEEPSEEK_API_KEY in Vercel.')
+      const { profile }: { profile: BusinessProfile } = ad
 
-        // ── Step 2: Search ───────────────────────────────────────────────
-        setAppStep('searching')
-        const searchRes = await fetch('/api/search-leads', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: params.location,
-            businessProfile: profile,
-          }),
-        })
-        const searchData = await searchRes.json()
-        if (!searchRes.ok) throw new Error(searchData?.error || 'Search step failed — check your SERPER_API_KEY in Vercel.')
-        const { leads: rawLeads } = searchData
+      // 2 — Search
+      setStep('searching')
+      const sr = await fetch('/api/search-leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location: params.location, businessProfile: profile }),
+      })
+      const sd = await sr.json()
+      if (!sr.ok) throw new Error(sd?.error || 'Search failed — check SERPER_API_KEY in Vercel.')
 
-        if (!rawLeads || rawLeads.length === 0) {
-          setAppStep('error')
-          setErrorMsg('Serper returned 0 results. Your API key may be missing quota, or check it in Vercel → Settings → Environment Variables.')
-          return
-        }
+      const rawLeads: EnrichedLead[] = sd.leads ?? []
+      if (!rawLeads.length) throw new Error(sd?.error || 'No companies found. Try a different description or location.')
 
-        // Seed placeholder cards immediately so the user sees something
-        const placeholders: EnrichedLead[] = rawLeads.map(
-          (l: Partial<EnrichedLead>, i: number) => ({
-            id: `placeholder-${i}`,
-            name: l.name || 'Unknown',
-            website: l.website,
-            phone: l.phone,
-            address: l.address,
-            snippet: l.snippet,
-            source: l.source || 'web',
-            score: 0,
-            painSignals: [],
-            whyNow: '',
-            outreachBlueprint: '',
-            status: 'pending',
+      // Seed placeholder cards
+      setLeads(rawLeads.map((l, i) => ({
+        id: `p-${i}`, name: l.name, website: l.website, phone: l.phone,
+        address: l.address, snippet: l.snippet, source: l.source ?? 'web',
+        score: 0, painSignals: [], whyNow: '', outreachBlueprint: '', status: 'pending',
+      })))
+
+      // 3 — Enrich each lead
+      setStep('enriching')
+      for (let i = 0; i < rawLeads.length; i++) {
+        setLeads((p) => p.map((l, idx) => idx === i ? { ...l, status: 'enriching' } : l))
+        try {
+          const er = await fetch('/api/enrich-lead', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lead: rawLeads[i], businessProfile: profile }),
           })
-        )
-        setLeads(placeholders)
-
-        // ── Step 3: Enrich each lead sequentially ────────────────────────
-        setAppStep('enriching')
-        let count = 0
-
-        for (let i = 0; i < rawLeads.length; i++) {
-          // Mark as enriching
-          setLeads((prev) =>
-            prev.map((l, idx) => (idx === i ? { ...l, status: 'enriching' } : l))
-          )
-
-          try {
-            const enrichRes = await fetch('/api/enrich-lead', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ lead: rawLeads[i], businessProfile: profile }),
-            })
-
-            if (enrichRes.ok) {
-              const { enriched }: { enriched: EnrichedLead } = await enrichRes.json()
-              setLeads((prev) =>
-                prev.map((l, idx) => (idx === i ? { ...enriched, status: 'done' } : l))
-              )
-            } else {
-              setLeads((prev) =>
-                prev.map((l, idx) => (idx === i ? { ...l, status: 'error' } : l))
-              )
-            }
-          } catch {
-            setLeads((prev) =>
-              prev.map((l, idx) => (idx === i ? { ...l, status: 'error' } : l))
-            )
+          if (er.ok) {
+            const { enriched } = await er.json()
+            setLeads((p) => p.map((l, idx) => idx === i ? { ...enriched, status: 'done' } : l))
+          } else {
+            setLeads((p) => p.map((l, idx) => idx === i ? { ...l, status: 'error' } : l))
           }
-
-          count++
-          setEnrichedCount(count)
+        } catch {
+          setLeads((p) => p.map((l, idx) => idx === i ? { ...l, status: 'error' } : l))
         }
-
-        setAppStep('done')
-      } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : 'Something went wrong.')
-        setAppStep('error')
+        setEnriched((n) => n + 1)
       }
-    },
-    []
-  )
 
-  const isLoading = appStep === 'analyzing' || appStep === 'searching' || appStep === 'enriching'
-  const showResults = leads.length > 0
-  const stepIndex = STEP_INDEX[appStep]
+      setStep('done')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong.')
+      setStep('error')
+    }
+  }, [])
+
+  const loading     = step === 'analyzing' || step === 'searching' || step === 'enriching'
+  const hasResults  = leads.length > 0
+  const showResults = loading || hasResults || step === 'error' || step === 'done'
 
   return (
-    <main className="min-h-screen bg-black text-white relative">
+    <main className="min-h-screen relative">
       <AnimatedBackground />
 
       <div className="relative z-10 flex flex-col min-h-screen">
-        {/* ── Navbar ─────────────────────────────────────────────────── */}
-        <nav className="flex items-center justify-between px-6 py-5 max-w-7xl mx-auto w-full">
-          <motion.div
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.4 }}
-            className="flex items-center gap-2"
-          >
-            <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30">
-              <Zap size={14} className="text-white" />
-            </div>
-            <span className="font-semibold text-white tracking-tight">LeadPilot</span>
-            <span
-              className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-              style={{
-                background: 'rgba(37,99,235,0.15)',
-                border: '1px solid rgba(37,99,235,0.3)',
-                color: '#60a5fa',
-              }}
-            >
-              BETA
-            </span>
-          </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, x: 10 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.4 }}
-            className="flex items-center gap-4"
-          >
-            {showResults && (
-              <button
-                onClick={reset}
-                className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white transition-colors"
-              >
-                <RotateCcw size={13} />
-                <span>New Search</span>
+        {/* Nav */}
+        <nav className="flex items-center justify-between px-5 py-4 max-w-6xl mx-auto w-full">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-md bg-brand flex items-center justify-center">
+              <Zap size={12} className="text-white" />
+            </div>
+            <span className="text-sm font-semibold tracking-tight text-[var(--text)]">LeadPilot</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded border border-brand/30 bg-brand/10 text-brand font-medium">BETA</span>
+          </div>
+          <div className="flex items-center gap-4">
+            {hasResults && (
+              <button onClick={reset} className="flex items-center gap-1.5 text-xs text-[var(--text-2)] hover:text-[var(--text)] transition-colors">
+                <RotateCcw size={12} /> New search
               </button>
             )}
-            <div
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full"
-              style={{
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                color: 'rgba(255,255,255,0.4)',
-              }}
-            >
+            <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-3)]">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse-slow" />
-              Pain Signal Engine
+              Hiring signal engine
             </div>
-          </motion.div>
+          </div>
         </nav>
 
-        {/* ── Main content ───────────────────────────────────────────── */}
-        <div className="flex-1 px-4 sm:px-6 max-w-7xl mx-auto w-full pb-24">
+        {/* Main */}
+        <div className="flex-1 px-4 sm:px-5 max-w-6xl mx-auto w-full pb-20">
+
+          {/* Hero */}
           <AnimatePresence mode="wait">
-            {/* Hero state — no search yet */}
-            {appStep === 'idle' && (
+            {step === 'idle' && (
               <motion.div
                 key="hero"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.4 }}
-                className="flex flex-col items-center text-center pt-20 pb-12"
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3 }}
+                className="flex flex-col items-center text-center pt-24 pb-14"
               >
-                {/* Badge */}
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.4 }}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium mb-8"
-                  style={{
-                    background: 'rgba(37,99,235,0.1)',
-                    border: '1px solid rgba(37,99,235,0.25)',
-                    color: '#93c5fd',
-                  }}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.05 }}
+                  className="inline-flex items-center gap-2 text-[11px] font-medium px-3 py-1.5 rounded-full border border-brand/25 bg-brand/8 text-brand mb-7"
                 >
-                  <Zap size={11} />
-                  Pain Signal Intelligence Engine
+                  <Zap size={10} /> Hiring Signal Intelligence
                 </motion.div>
 
-                {/* Headline */}
                 <motion.h1
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.1 }}
-                  className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight leading-[1.05] mb-6 max-w-3xl"
-                >
-                  Find your next client
-                  <br />
-                  <span className="gradient-text-blue">before they find you.</span>
-                </motion.h1>
-
-                {/* Subheadline */}
-                <motion.p
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.2 }}
-                  className="text-zinc-500 text-lg max-w-xl mb-12 leading-relaxed"
-                >
-                  Describe what you sell. We crawl the web, detect pain signals, and deliver
-                  leads ranked by how badly they need you — with a personalized opener for each.
-                </motion.p>
-
-                {/* Feature pills */}
-                <motion.div
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.25 }}
-                  className="flex flex-wrap items-center justify-center gap-2 mb-12"
+                  transition={{ delay: 0.1 }}
+                  className="text-5xl sm:text-6xl font-bold tracking-tight leading-[1.08] mb-5 max-w-2xl"
+                  style={{ letterSpacing: '-0.03em' }}
+                >
+                  Find clients who<br />
+                  <span style={{ color: 'var(--brand)' }}>need you right now.</span>
+                </motion.h1>
+
+                <motion.p
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.15 }}
+                  className="text-sm text-[var(--text-2)] max-w-md mb-10 leading-relaxed"
+                >
+                  Describe what you sell. We find mid-size companies actively hiring for roles
+                  your service replaces — that hiring pattern is the strongest buying signal possible.
+                </motion.p>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="flex flex-wrap justify-center gap-2 mb-10"
                 >
                   {[
-                    { icon: MapPin, label: 'Local + global leads' },
-                    { icon: TrendingUp, label: 'Intent signal scoring' },
-                    { icon: Globe, label: 'Website DNA analysis' },
-                    { icon: Zap, label: 'Personalized outreach' },
-                  ].map(({ icon: Icon, label }) => (
-                    <div
-                      key={label}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs text-zinc-400"
-                      style={{
-                        background: 'rgba(255,255,255,0.03)',
-                        border: '1px solid rgba(255,255,255,0.07)',
-                      }}
-                    >
-                      <Icon size={11} className="text-blue-500" />
-                      {label}
-                    </div>
+                    '📋 Hiring signal detection',
+                    '🎯 5 deep leads per search',
+                    '📍 Local + global',
+                    '✉️ Personalized openers',
+                  ].map((f) => (
+                    <span key={f} className="text-[11px] text-[var(--text-3)] px-2.5 py-1 rounded-full border border-white/[0.07] bg-white/[0.03]">{f}</span>
                   ))}
                 </motion.div>
 
-                <SearchPanel onSearch={handleSearch} loading={isLoading} />
+                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="w-full">
+                  <SearchPanel onSearch={handleSearch} loading={loading} />
+                </motion.div>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* ── Loading / Results ─────────────────────────────────── */}
-          <AnimatePresence>
-            {(isLoading || showResults || appStep === 'error' || appStep === 'done') && (
-              <motion.div
-                key="results"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="pt-6"
-              >
-                {/* Step indicator */}
-                {isLoading && (
-                  <StepIndicator
-                    currentStep={stepIndex}
-                    totalLeads={leads.length}
-                    enrichedCount={enrichedCount}
-                  />
-                )}
+          {/* Results / loading */}
+          {showResults && (
+            <div className="pt-6">
+              {loading && (
+                <StepIndicator
+                  currentStep={STEP_INDEX[step]}
+                  totalLeads={leads.length}
+                  enrichedCount={enrichedCount}
+                />
+              )}
 
-                {/* Compact search bar when we have results */}
-                {showResults && !isLoading && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="mb-8"
-                  >
-                    <SearchPanel onSearch={handleSearch} loading={isLoading} />
-                  </motion.div>
-                )}
+              {hasResults && !loading && (
+                <div className="mb-6">
+                  <SearchPanel onSearch={handleSearch} loading={loading} />
+                </div>
+              )}
 
-                {/* Error */}
-                {(appStep === 'error' || (appStep === 'done' && !showResults)) && errorMsg && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.97 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="max-w-lg mx-auto text-center py-12"
-                  >
-                    <div
-                      className="rounded-2xl p-8"
-                      style={{
-                        background: 'rgba(239,68,68,0.05)',
-                        border: '1px solid rgba(239,68,68,0.15)',
-                      }}
+              {/* Error */}
+              {(step === 'error' || (step === 'done' && !hasResults)) && error && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="max-w-md mx-auto text-center py-16"
+                >
+                  <div className="surface rounded-xl p-7">
+                    <p className="text-sm font-medium text-[var(--text)] mb-2">Search failed</p>
+                    <p className="text-xs text-[var(--text-2)] leading-relaxed mb-5">{error}</p>
+                    <a
+                      href="/api/debug"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] text-[var(--text-3)] hover:text-[var(--text-2)] transition-colors mb-5"
                     >
-                      <p className="text-red-400 font-medium mb-2">Something went wrong</p>
-                      <p className="text-zinc-400 text-sm mb-4 leading-relaxed">{errorMsg}</p>
-                      <a
-                        href="/api/debug"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block text-xs text-zinc-600 hover:text-zinc-400 transition-colors mb-5"
-                      >
-                        → Open /api/debug to check API key status
-                      </a>
-                      <button
-                        onClick={reset}
-                        className="flex items-center gap-2 mx-auto text-sm text-zinc-300 hover:text-white transition-colors"
-                      >
-                        <RotateCcw size={14} />
-                        Try again
+                      Diagnose API keys at /api/debug <ExternalLink size={10} />
+                    </a>
+                    <div>
+                      <button onClick={reset} className="flex items-center gap-1.5 mx-auto text-xs text-[var(--text-2)] hover:text-[var(--text)] transition-colors">
+                        <RotateCcw size={12} /> Try again
                       </button>
                     </div>
-                  </motion.div>
-                )}
+                  </div>
+                </motion.div>
+              )}
 
-                {/* Lead grid */}
-                {showResults && <LeadGrid leads={leads} />}
-              </motion.div>
-            )}
-          </AnimatePresence>
+              {hasResults && <LeadGrid leads={leads} />}
+            </div>
+          )}
         </div>
 
-        {/* ── Footer ─────────────────────────────────────────────────── */}
-        <footer className="border-t border-white/5 py-5 px-6">
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded bg-blue-600 flex items-center justify-center">
+        {/* Footer */}
+        <footer className="border-t border-white/[0.05] py-4 px-5">
+          <div className="max-w-6xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-4 rounded bg-brand flex items-center justify-center">
                 <Zap size={9} className="text-white" />
               </div>
-              <span className="text-xs text-zinc-600">LeadPilot</span>
+              <span className="text-[11px] text-[var(--text-3)]">LeadPilot</span>
             </div>
-            <p className="text-xs text-zinc-700">
-              Powered by DeepSeek · Serper · Built in-house
-            </p>
+            <p className="text-[11px] text-[var(--text-3)]">DeepSeek · Serper · Built to find buyers, not pages</p>
           </div>
         </footer>
       </div>

@@ -2,11 +2,11 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Globe, FileText, MapPin, Zap, ArrowRight } from 'lucide-react'
+import { Globe, FileText, MapPin, ArrowRight, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 
 interface SearchPanelProps {
-  onSearch: (params: { type: 'description' | 'url'; value: string; location: string }) => void
+  onSearch: (p: { type: 'description' | 'url'; value: string; location: string }) => void
   loading: boolean
 }
 
@@ -21,135 +21,96 @@ export default function SearchPanel({ onSearch, loading }: SearchPanelProps) {
     onSearch({ type: tab, value: value.trim(), location: location.trim() })
   }
 
-  const examples = {
-    description: 'We help B2B SaaS companies implement AI agents and automation. We also place FinOps engineers to help companies reduce cloud spend.',
-    url: 'https://yourcompany.com',
-  }
-
   return (
     <motion.form
       onSubmit={handleSubmit}
-      initial={{ opacity: 0, y: 24 }}
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
+      transition={{ duration: 0.4, delay: 0.2 }}
       className="w-full max-w-2xl mx-auto"
     >
-      <div
-        className="relative rounded-2xl overflow-hidden"
-        style={{
-          background: 'rgba(255,255,255,0.03)',
-          border: '1px solid rgba(255,255,255,0.08)',
-          backdropFilter: 'blur(20px)',
-        }}
-      >
-        {/* Tab switcher */}
-        <div
-          className="flex border-b"
-          style={{ borderColor: 'rgba(255,255,255,0.06)' }}
-        >
-          {[
+      <div className="rounded-xl overflow-hidden surface">
+        {/* Tabs */}
+        <div className="flex border-b border-white/[0.06]">
+          {([
             { key: 'description', label: 'Describe your business', icon: FileText },
-            { key: 'url', label: 'Paste website URL', icon: Globe },
-          ].map(({ key, label, icon: Icon }) => (
+            { key: 'url',         label: 'Paste a URL',            icon: Globe },
+          ] as const).map(({ key, label, icon: Icon }) => (
             <button
               key={key}
               type="button"
-              onClick={() => setTab(key as 'description' | 'url')}
+              onClick={() => setTab(key)}
               className={clsx(
-                'flex-1 flex items-center justify-center gap-2 py-4 text-sm font-medium transition-all duration-200',
+                'flex-1 flex items-center justify-center gap-2 py-3 text-xs font-medium transition-colors',
                 tab === key
-                  ? 'text-white border-b-2 border-blue-500'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  ? 'text-white border-b-2 border-brand bg-white/[0.03]'
+                  : 'text-[var(--text-3)] hover:text-[var(--text-2)]'
               )}
-              style={
-                tab === key
-                  ? { background: 'rgba(59,130,246,0.05)' }
-                  : {}
-              }
             >
-              <Icon size={15} />
+              <Icon size={13} />
               {label}
             </button>
           ))}
         </div>
 
-        <div className="p-6 space-y-4">
-          {/* Main input */}
+        <div className="p-4 space-y-3">
           {tab === 'description' ? (
-            <div>
-              <textarea
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                placeholder={examples.description}
-                rows={4}
-                className="w-full bg-transparent text-white placeholder-zinc-600 text-sm leading-relaxed resize-none outline-none"
-                disabled={loading}
-              />
-            </div>
+            <textarea
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder="e.g. We help B2B companies implement AI agents to automate operations and reduce cloud costs."
+              rows={3}
+              disabled={loading}
+              className="w-full bg-transparent text-[var(--text)] placeholder-[var(--text-3)] text-sm resize-none outline-none leading-relaxed"
+            />
           ) : (
-            <div className="flex items-center gap-3">
-              <Globe size={16} className="text-zinc-500 flex-shrink-0" />
+            <div className="flex items-center gap-2">
+              <Globe size={14} className="text-[var(--text-3)] shrink-0" />
               <input
                 type="url"
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 placeholder="https://yourcompany.com"
-                className="w-full bg-transparent text-white placeholder-zinc-600 text-sm outline-none"
                 disabled={loading}
+                className="w-full bg-transparent text-[var(--text)] placeholder-[var(--text-3)] text-sm outline-none"
               />
             </div>
           )}
 
-          {/* Divider */}
-          <div style={{ height: '1px', background: 'rgba(255,255,255,0.06)' }} />
+          <div className="h-px bg-white/[0.06]" />
 
-          {/* Location + Submit */}
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 flex-1">
-              <MapPin size={14} className="text-zinc-500 flex-shrink-0" />
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <MapPin size={13} className="text-[var(--text-3)] shrink-0" />
               <input
                 type="text"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
-                placeholder="Location (e.g. New York, NY) — leave blank for global"
-                className="w-full bg-transparent text-white placeholder-zinc-600 text-sm outline-none"
+                placeholder="City or region (optional — leave blank for global)"
                 disabled={loading}
+                className="w-full bg-transparent text-[var(--text)] placeholder-[var(--text-3)] text-sm outline-none truncate"
               />
             </div>
 
-            <motion.button
+            <button
               type="submit"
               disabled={!value.trim() || loading}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
               className={clsx(
-                'flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 flex-shrink-0',
+                'shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all',
                 value.trim() && !loading
-                  ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20'
-                  : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                  ? 'bg-brand hover:bg-brand-hover text-white'
+                  : 'bg-white/5 text-[var(--text-3)] cursor-not-allowed'
               )}
             >
               {loading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                  <span>Running</span>
-                </>
+                <><Loader2 size={12} className="animate-spin" /> Running</>
               ) : (
-                <>
-                  <Zap size={14} />
-                  <span>Find Leads</span>
-                  <ArrowRight size={14} />
-                </>
+                <>Find leads <ArrowRight size={12} /></>
               )}
-            </motion.button>
+            </button>
           </div>
         </div>
       </div>
-
-      {/* Helper text */}
-      <p className="text-center text-zinc-600 text-xs mt-3">
-        Powered by Pain Signal Intelligence — finds leads & tells you exactly why to reach out
-      </p>
     </motion.form>
   )
 }

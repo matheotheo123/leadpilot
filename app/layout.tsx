@@ -1,29 +1,16 @@
 import type { Metadata } from 'next'
+import { GeistSans } from 'geist/font/sans'
+import { GeistMono } from 'geist/font/mono'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'LeadPilot — Pain Signal Intelligence',
-  description:
-    'Find your next client before they find you. AI-powered lead intelligence that detects pain signals and tells you exactly why to reach out.',
-  keywords: ['lead generation', 'B2B leads', 'sales intelligence', 'AI leads'],
-  openGraph: {
-    title: 'LeadPilot',
-    description: 'Find your next client before they find you.',
-    type: 'website',
-  },
+  title: 'LeadPilot — Find clients before they find you',
+  description: 'AI-powered lead intelligence that detects hiring signals and tells you exactly why to reach out.',
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      </head>
+    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <body>{children}</body>
     </html>
   )

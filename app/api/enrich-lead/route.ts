@@ -6,7 +6,7 @@ import type { EnrichedLead, BusinessProfile, PainSignal } from '@/types'
 
 export const maxDuration = 45
 
-interface EnrichResponse {
+interface EnrichResult {
   score: number
   industry: string
   email: string | null
@@ -21,82 +21,70 @@ export async function POST(request: NextRequest) {
     const { lead, businessProfile }: { lead: EnrichedLead; businessProfile: BusinessProfile } =
       await request.json()
 
-    // Crawl their website + search for hiring signals in parallel
-    const [siteData, hiringSearch] = await Promise.allSettled([
+    // Run website crawl and job posting search in parallel
+    const [siteResult, jobsResult] = await Promise.allSettled([
       lead.website ? crawlWebsite(lead.website) : Promise.resolve(null),
       serperSearch(
-        `"${lead.name}" (hiring OR jobs OR careers OR "we're growing") site:linkedin.com OR site:builtin.com OR site:lever.co OR site:greenhouse.io`,
+        `"${lead.name}" (hiring OR "open roles" OR "we're hiring" OR careers OR jobs)`,
         5
       ),
     ])
 
-    const site = siteData.status === 'fulfilled' ? siteData.value : null
-    const hiring =
-      hiringSearch.status === 'fulfilled'
-        ? hiringSearch.value.organic
-            ?.slice(0, 3)
-            .map((r) => r.snippet)
-            .join(' | ')
+    const site = siteResult.status === 'fulfilled' ? siteResult.value : null
+    const jobSnippets =
+      jobsResult.status === 'fulfilled'
+        ? jobsResult.value.organic
+            ?.slice(0, 4)
+            .map((r) => `${r.title}: ${r.snippet}`)
+            .join('\n')
         : null
 
-    // Also pull any emails found during crawl
-    const crawledEmails = site?.emails?.[0] || null
+    const crawledEmail = site?.emails?.[0] ?? null
 
-    const contextBlock = `
-COMPANY: ${lead.name}
-WEBSITE: ${lead.website || 'unknown'}
-ADDRESS: ${lead.address || 'not found'}
-INITIAL DESCRIPTION: ${lead.snippet || 'none'}
-${
-  site
-    ? `
-WEBSITE TITLE: ${site.title}
-META DESCRIPTION: ${site.description}
-KEY HEADLINES: ${site.h1s.join(' | ')}
-SUB-HEADLINES: ${site.h2s.join(' | ')}
-TECH STACK DETECTED: ${site.techMentions.join(', ') || 'none detected'}
-SITE CONTENT EXCERPT: ${site.bodyText.slice(0, 2000)}
-EMAILS ON SITE: ${site.emails.join(', ') || 'none found'}
-`
-    : ''
-}
-${hiring ? `HIRING ACTIVITY SIGNALS: ${hiring}` : ''}
-    `.trim()
+    const context = [
+      `COMPANY: ${lead.name}`,
+      lead.website ? `WEBSITE: ${lead.website}` : null,
+      lead.address ? `ADDRESS: ${lead.address}` : null,
+      lead.phone ? `PHONE: ${lead.phone}` : null,
+      lead.snippet ? `SEARCH SNIPPET: ${lead.snippet}` : null,
+      site ? `\nWEBSITE TITLE: ${site.title}` : null,
+      site?.description ? `META DESCRIPTION: ${site.description}` : null,
+      site?.h1s.length ? `HEADLINES: ${site.h1s.join(' | ')}` : null,
+      site?.techMentions.length ? `TECH STACK: ${site.techMentions.join(', ')}` : null,
+      site ? `SITE CONTENT: ${site.bodyText.slice(0, 1800)}` : null,
+      site?.emails.length ? `EMAILS FOUND: ${site.emails.join(', ')}` : null,
+      jobSnippets ? `\nACTIVE JOB POSTINGS FOUND:\n${jobSnippets}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n')
 
-    const analysis = await deepseekJSON<EnrichResponse>(
-      `You are an elite B2B sales intelligence engine with deep knowledge of business pain points, hiring signals, and growth indicators. Your analysis must be specific, actionable, and based only on evidence from the data provided.`,
-      `You are analyzing a potential sales prospect for a company that sells: ${businessProfile.sells.join(', ')}
+    const analysis = await deepseekJSON<EnrichResult>(
+      `You are an elite B2B sales intelligence analyst. Your job is to analyze a prospect company and determine whether they genuinely need a specific service, using concrete evidence from their website and job postings.`,
+      `VENDOR SELLS: ${businessProfile.sells?.join(', ')}
+PAIN POINTS SOLVED: ${businessProfile.painPoints?.join(', ')}
+TARGET ROLES (job titles that signal the need): ${businessProfile.roles?.join(', ')}
 
-Their ideal customer: ${businessProfile.idealCustomer}
-Pain points they solve: ${businessProfile.painPoints.join(', ')}
+PROSPECT DATA:
+${context}
 
-Here is all available data on the prospect:
-${contextBlock}
-
-Analyze this company and return JSON with exactly these fields:
+Analyze this prospect and return JSON:
 {
-  "score": <integer 0-100 representing how strong a prospect this is, based on evidence>,
-  "industry": "<detected industry, be specific>",
-  "email": "<best contact email found, or null>",
+  "score": <0-100 integer. 80+ only if there is CONCRETE evidence like matching job postings, relevant tech stack, or clear operational scale. Be strict.>,
+  "industry": "<specific industry>",
+  "email": "<best contact email or null>",
   "companySize": "<startup|smb|mid-market|enterprise>",
   "painSignals": [
     {
-      "signal": "<specific, evidence-based signal — e.g. 'Actively hiring 3 AI Engineers on LinkedIn'>",
+      "signal": "<specific evidence — e.g. 'Hiring 3 Operations Coordinators (role vendor replaces)' or 'AWS mentioned across 4 job postings'>",
       "urgency": "<high|medium|low>",
       "type": "<hiring|cost|growth|tech|news|funding>"
     }
   ],
-  "whyNow": "<2-3 sentences explaining WHY RIGHT NOW is the optimal moment to reach out — must reference specific evidence>",
-  "outreachBlueprint": "<A personalized 2-3 sentence cold outreach opener that references specific pain signals, sounds human, and opens a conversation — not a pitch>"
+  "whyNow": "<2 sentences. Must cite specific evidence from their job postings or site. Why is RIGHT NOW the moment to reach out?>",
+  "outreachBlueprint": "<2-3 sentence cold opener. Reference a specific job posting or observable fact about them. Sound human, not salesy. Open a conversation, don't pitch.>"
 }
 
-Score guidance:
-- 80-100: Multiple strong signals, clear immediate need
-- 60-79: Clear fit, 1-2 strong signals
-- 40-59: Decent fit, signals are indirect
-- Below 40: Weak or speculative fit
-
-Be specific. Vague signals like 'company is growing' score lower than 'hiring 5 ML engineers on LinkedIn'.`
+Score guidance: 80-100 = job postings directly match target roles OR clear evidence of pain. 60-79 = indirect signals. Below 60 = speculative. If no evidence found, score 30-45.`
     )
 
     const enriched: EnrichedLead = {
@@ -104,22 +92,22 @@ Be specific. Vague signals like 'company is growing' score lower than 'hiring 5 
       name: lead.name,
       website: lead.website,
       phone: lead.phone,
-      email: analysis.email || crawledEmails || undefined,
+      email: analysis.email || crawledEmail || undefined,
       address: lead.address,
       industry: analysis.industry,
       companySize: analysis.companySize,
-      score: Math.min(100, Math.max(0, analysis.score)),
-      painSignals: analysis.painSignals || [],
-      whyNow: analysis.whyNow,
-      outreachBlueprint: analysis.outreachBlueprint,
+      score: Math.min(100, Math.max(0, Math.round(analysis.score))),
+      painSignals: Array.isArray(analysis.painSignals) ? analysis.painSignals : [],
+      whyNow: analysis.whyNow || '',
+      outreachBlueprint: analysis.outreachBlueprint || '',
       status: 'done',
       source: lead.source,
       snippet: lead.snippet,
     }
 
     return NextResponse.json({ enriched })
-  } catch (error) {
-    console.error('Enrich error:', error)
-    return NextResponse.json({ error: 'Enrichment failed' }, { status: 500 })
+  } catch (err) {
+    console.error('enrich-lead error:', err)
+    return NextResponse.json({ error: `Enrichment failed: ${err instanceof Error ? err.message : String(err)}` }, { status: 500 })
   }
 }

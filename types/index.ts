@@ -4,8 +4,9 @@ export interface BusinessProfile {
   sells: string[]
   idealCustomer: string
   painPoints: string[]
-  targets: string[]        // company types DeepSeek identifies — code turns these into queries
-  searchQueries: string[]  // kept for backwards compat, unused in new flow
+  targets: string[]   // company type labels for direct search
+  roles: string[]     // job titles that signal the company needs this service
+  searchQueries: string[]
   mapsQueries: string[]
   industries: string[]
 }

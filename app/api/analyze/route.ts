@@ -10,6 +10,7 @@ interface AnalysisResult {
   sells: string[]
   painPoints: string[]
   targets: string[]
+  roles: string[]
 }
 
 export async function POST(request: NextRequest) {
@@ -25,29 +26,30 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Simple, focused ask: understand the business + identify what types of companies to target
     const result = await deepseekJSON<AnalysisResult>(
-      'You are a B2B sales expert.',
-      `Someone describes their business as: "${input}"
+      'You are a B2B sales expert who identifies ideal buyers for a business.',
+      `Business description: "${input}"
 
-Understand what they sell and who their buyers are. Return this JSON:
+Return JSON:
 {
   "description": "one sentence: what they sell",
   "sells": ["service 1", "service 2"],
-  "painPoints": ["problem they solve 1", "problem they solve 2", "problem they solve 3"],
-  "targets": ["type of company 1", "type of company 2", "type of company 3", "type of company 4", "type of company 5", "type of company 6"]
+  "painPoints": ["pain 1", "pain 2", "pain 3"],
+  "targets": ["company type 1", "company type 2", "company type 3"],
+  "roles": ["job title 1", "job title 2", "job title 3", "job title 4"]
 }
 
-For targets: list 6 short company type labels (2-4 words each) that describe businesses who would HIRE this service. Examples of good target labels: "tech startup", "SaaS company", "healthcare clinic", "law firm", "e-commerce brand", "logistics company". Pick types relevant to what was described.`
+For "targets": 3 short company-type labels (e.g. "SaaS startup", "logistics company", "law firm") describing who would BUY this service.
+
+For "roles": 4 specific job titles that — when a company is actively HIRING them — signal the company has the exact pain this service solves. Think: what manual or inefficient role does this service replace or augment? Examples for an AI automation company: "operations coordinator", "data entry specialist", "customer support representative", "manual reporting analyst". These should be roles a mid-size company (50-500 employees) would realistically post.`
     )
 
     const profile: BusinessProfile = {
-      description: result.description || input.slice(0, 100),
-      sells: Array.isArray(result.sells) ? result.sells : [input.slice(0, 60)],
+      description: result.description || input.slice(0, 120),
+      sells: Array.isArray(result.sells) ? result.sells : [],
       painPoints: Array.isArray(result.painPoints) ? result.painPoints : [],
-      targets: Array.isArray(result.targets) && result.targets.length > 0
-        ? result.targets.slice(0, 6)
-        : ['technology company', 'software startup', 'SaaS company', 'IT firm', 'digital agency', 'enterprise company'],
+      targets: Array.isArray(result.targets) ? result.targets.slice(0, 3) : ['technology company', 'software startup', 'SaaS company'],
+      roles: Array.isArray(result.roles) ? result.roles.slice(0, 4) : [],
       idealCustomer: result.targets?.[0] || 'growing businesses',
       industries: [],
       searchQueries: [],
@@ -58,7 +60,7 @@ For targets: list 6 short company type labels (2-4 words each) that describe bus
   } catch (error) {
     console.error('Analyze error:', error)
     return NextResponse.json(
-      { error: 'Failed to analyze. Check your DeepSeek API key.' },
+      { error: `Analyze failed: ${error instanceof Error ? error.message : String(error)}` },
       { status: 500 }
     )
   }

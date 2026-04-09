@@ -4,36 +4,29 @@ import { motion } from 'framer-motion'
 import LeadCard from './LeadCard'
 import type { EnrichedLead } from '@/types'
 
-interface LeadGridProps {
-  leads: EnrichedLead[]
-}
-
-export default function LeadGrid({ leads }: LeadGridProps) {
+export default function LeadGrid({ leads }: { leads: EnrichedLead[] }) {
   const done = leads.filter((l) => l.status === 'done')
-  const sorted = [
-    ...done.sort((a, b) => b.score - a.score),
-    ...leads.filter((l) => l.status !== 'done'),
-  ]
+  const rest = leads.filter((l) => l.status !== 'done')
+  const sorted = [...done.sort((a, b) => b.score - a.score), ...rest]
 
   return (
-    <div className="w-full">
+    <div>
       {done.length > 0 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="flex items-center gap-3 mb-6"
+          className="flex items-center gap-3 mb-5"
         >
-          <p className="text-sm text-zinc-400">
-            <span className="text-white font-semibold">{done.length}</span> leads found
-          </p>
-          <div className="h-px flex-1 bg-white/5" />
-          <p className="text-xs text-zinc-600">Sorted by signal strength</p>
+          <span className="text-xs text-[var(--text-2)]">
+            <span className="text-[var(--text)] font-semibold">{done.length}</span> lead{done.length !== 1 ? 's' : ''} found
+          </span>
+          <div className="flex-1 h-px bg-white/[0.06]" />
+          <span className="text-[11px] text-[var(--text-3)]">sorted by signal strength</span>
         </motion.div>
       )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {sorted.map((lead, index) => (
-          <LeadCard key={lead.id || index} lead={lead} index={index} />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {sorted.map((lead, i) => (
+          <LeadCard key={lead.id || i} lead={lead} index={i} />
         ))}
       </div>
     </div>
