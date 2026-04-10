@@ -7,7 +7,8 @@ import AnimatedBackground from '@/components/AnimatedBackground'
 import SearchPanel from '@/components/SearchPanel'
 import StepIndicator from '@/components/StepIndicator'
 import LeadGrid from '@/components/LeadGrid'
-import type { EnrichedLead, BusinessProfile } from '@/types'
+import EventsSection from '@/components/EventsSection'
+import type { EnrichedLead, BusinessProfile, LeadEvent } from '@/types'
 
 type Step = 'idle' | 'analyzing' | 'searching' | 'enriching' | 'done' | 'error'
 
@@ -20,8 +21,10 @@ export default function Home() {
   const [leads, setLeads]             = useState<EnrichedLead[]>([])
   const [enrichedCount, setEnriched]  = useState(0)
   const [error, setError]             = useState<string | null>(null)
+  const [events, setEvents]           = useState<LeadEvent[]>([])
+  const [eventsLoading, setEventsLoading] = useState(false)
 
-  const reset = () => { setStep('idle'); setLeads([]); setEnriched(0); setError(null) }
+  const reset = () => { setStep('idle'); setLeads([]); setEnriched(0); setError(null); setEvents([]); setEventsLoading(false) }
 
   const handleSearch = useCallback(async (
     params: { type: 'description' | 'url'; value: string; location: string }
@@ -59,8 +62,19 @@ export default function Home() {
         score: 0, painSignals: [], whyNow: '', outreachBlueprint: '', status: 'pending',
       })))
 
-      // 3 — Enrich each lead
+      // 3 — Enrich each lead + fetch events in parallel
       setStep('enriching')
+      setEventsLoading(true)
+      // Fire events search in background — don't await, update state when done
+      fetch('/api/search-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location: params.location, businessProfile: profile }),
+      })
+        .then(r => r.json())
+        .then(d => { setEvents(d.events ?? []); setEventsLoading(false) })
+        .catch(() => setEventsLoading(false))
+
       for (let i = 0; i < rawLeads.length; i++) {
         setLeads((p) => p.map((l, idx) => idx === i ? { ...l, status: 'enriching' } : l))
         try {
@@ -232,6 +246,9 @@ export default function Home() {
               )}
 
               {hasResults && <LeadGrid leads={leads} />}
+              {(step === 'done' || eventsLoading) && (events.length > 0 || eventsLoading) && (
+                <EventsSection events={events} loading={eventsLoading} />
+              )}
             </div>
           )}
         </div>

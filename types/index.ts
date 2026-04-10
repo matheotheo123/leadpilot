@@ -57,6 +57,18 @@ export interface EnrichedLead {
   decisionMakers?: DecisionMaker[]
 }
 
+export type EventType = 'conference' | 'networking' | 'expo' | 'hackathon' | 'meetup' | 'other'
+
+export interface LeadEvent {
+  title: string
+  date?: string
+  location: string
+  description: string
+  url: string
+  isLocal: boolean
+  type: EventType
+}
+
 export type SearchStep = 'idle' | 'analyzing' | 'searching' | 'enriching' | 'done' | 'error'
 
 export interface SearchState {

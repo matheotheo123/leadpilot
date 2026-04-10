@@ -60,8 +60,8 @@ export async function POST(request: NextRequest) {
     // "51-200 employees" in the snippet = perfect mid-size target.
     const linkedInQueries = targets.slice(0, 2).map((t) =>
       location
-        ? `site:linkedin.com/company "${t}" "${location}"`
-        : `site:linkedin.com/company "${t}"`
+        ? `site:linkedin.com/company "${t}" "${location}" -"10,001+" -"5,001-10,000"`
+        : `site:linkedin.com/company "${t}" -"10,001+" -"5,001-10,000"`
     )
 
     // ── 2. Clutch.co — curated verified B2B company directory ─────────────
@@ -180,11 +180,13 @@ export async function POST(request: NextRequest) {
           `Vendor sells: ${profile.sells?.join(', ')}
 Ideal buyer: ${profile.idealCustomer}
 Pain solved: ${profile.painPoints?.slice(0, 2).join(', ')}
+${location ? `Required location: ${location} — ONLY keep companies that are clearly in or near this location based on their address, snippet, or name. Reject anything with no location evidence or a different city/country.` : ''}
 
 Pick the 5 BEST prospects from this list. Rules:
 - Must be a real operating company (not a blog, news article, directory listing, or government org)
 - Must be mid-size: 10-500 employees (reject anything that looks like a Fortune 500 or 1-person shop)
 - Must plausibly need what the vendor sells based on their industry/description
+${location ? `- Must be verifiably in or near "${location}" — this is non-negotiable` : ''}
 - Prefer companies with specific descriptions over generic ones
 
 Candidates:
