@@ -4,10 +4,10 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Phone, Mail, Globe, MapPin, Copy, Check, ChevronDown,
-  Briefcase, DollarSign, TrendingUp, Code2, Newspaper, Loader2, ExternalLink
+  Briefcase, DollarSign, TrendingUp, Code2, Newspaper, Loader2, ExternalLink, User
 } from 'lucide-react'
 import clsx from 'clsx'
-import type { EnrichedLead, PainSignal, SignalType } from '@/types'
+import type { EnrichedLead, PainSignal, SignalType, DecisionMaker } from '@/types'
 
 const SIGNAL_STYLE: Record<SignalType, { icon: typeof Briefcase; pill: string; dot: string }> = {
   hiring:  { icon: Briefcase,    pill: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',  dot: 'bg-emerald-400' },
@@ -181,6 +181,30 @@ export default function LeadCard({ lead, index }: { lead: EnrichedLead; index: n
               </a>
             )}
           </div>
+
+          {/* Decision makers */}
+          {lead.decisionMakers && lead.decisionMakers.length > 0 && (
+            <div className="rounded-lg bg-white/[0.03] border border-white/[0.06] p-3 space-y-2">
+              <p className="text-[10px] uppercase tracking-widest text-[var(--text-3)] font-medium">Decision Makers</p>
+              {lead.decisionMakers.slice(0, 3).map((dm: DecisionMaker, i: number) => (
+                <div key={i} className="flex items-start gap-2">
+                  <User size={11} className="text-brand shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <span className="text-xs text-[var(--text-2)] font-medium">{dm.name}</span>
+                    <span className="text-xs text-[var(--text-3)]"> · {dm.role}</span>
+                    {dm.email && (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <a href={`mailto:${dm.email}`} className="text-[11px] font-mono text-[var(--text-3)] hover:text-brand transition-colors truncate">
+                          {dm.email}
+                        </a>
+                        <CopyBtn text={dm.email} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Pain signals */}
           {lead.painSignals?.length > 0 && (

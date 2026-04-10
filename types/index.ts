@@ -32,6 +32,12 @@ export interface PainSignal {
 
 export type LeadStatus = 'pending' | 'enriching' | 'done' | 'error'
 
+export interface DecisionMaker {
+  name: string
+  role: string
+  email?: string
+}
+
 export interface EnrichedLead {
   id: string
   name: string
@@ -48,6 +54,7 @@ export interface EnrichedLead {
   status: LeadStatus
   source: 'web' | 'maps'
   snippet?: string
+  decisionMakers?: DecisionMaker[]
 }
 
 export type SearchStep = 'idle' | 'analyzing' | 'searching' | 'enriching' | 'done' | 'error'

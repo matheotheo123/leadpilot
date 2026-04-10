@@ -58,18 +58,26 @@ export async function POST(request: NextRequest) {
     const crawledEmail = site?.emails?.[0] ?? null
 
     // Build context from everything we know
+    const decisionMakerText = site?.decisionMakers?.length
+      ? site.decisionMakers
+          .map(m => `${m.name} (${m.role})${m.email ? ` — ${m.email}` : ''}`)
+          .join(', ')
+      : null
+
     const context = [
       `COMPANY: ${lead.name}`,
       actualWebsite ? `WEBSITE: ${actualWebsite}` : null,
       lead.address   ? `ADDRESS: ${lead.address}`   : null,
       lead.phone     ? `PHONE: ${lead.phone}`       : null,
       lead.snippet   ? `DIRECTORY DESCRIPTION: ${lead.snippet}` : null,
-      site?.title         ? `\nWEBSITE TITLE: ${site.title}`                         : null,
-      site?.description   ? `META DESCRIPTION: ${site.description}`                  : null,
-      site?.h1s?.length   ? `HEADLINES: ${site.h1s.join(' | ')}`                     : null,
-      site?.techMentions?.length ? `TECH STACK DETECTED: ${site.techMentions.join(', ')}` : null,
-      site?.bodyText      ? `SITE CONTENT: ${site.bodyText.slice(0, 1800)}`          : null,
-      site?.emails?.length ? `EMAILS ON SITE: ${site.emails.join(', ')}`             : null,
+      site?.title         ? `\nWEBSITE TITLE: ${site.title}`                                 : null,
+      site?.description   ? `META DESCRIPTION: ${site.description}`                          : null,
+      site?.h1s?.length   ? `HEADLINES: ${site.h1s.join(' | ')}`                             : null,
+      site?.employeeCount ? `TEAM SIZE SIGNAL: ${site.employeeCount}`                        : null,
+      site?.techMentions?.length ? `TECH STACK: ${site.techMentions.join(', ')}`             : null,
+      site?.bodyText      ? `SITE CONTENT: ${site.bodyText.slice(0, 1800)}`                  : null,
+      site?.emails?.length ? `EMAILS FOUND: ${site.emails.join(', ')}`                       : null,
+      decisionMakerText   ? `DECISION MAKERS: ${decisionMakerText}`                          : null,
       news ? `\nRECENT NEWS / ANNOUNCEMENTS:\n${news}` : null,
     ].filter(Boolean).join('\n')
 
@@ -86,7 +94,7 @@ Return JSON:
 {
   "score": <0-100. Be strict: 75+ requires real evidence like matching tech stack, relevant scale signals, or specific news. Don't give high scores speculatively.>,
   "industry": "<specific industry, e.g. 'B2B SaaS — HR Tech' not just 'Technology'>",
-  "email": "<best contact email found, or null>",
+  "email": "<best contact email — prefer a decision maker's direct email if listed under DECISION MAKERS, else use any email from EMAILS FOUND, else null>",
   "companySize": "<startup|smb|mid-market|enterprise>",
   "painSignals": [
     {
@@ -117,6 +125,7 @@ Return JSON:
       status: 'done',
       source: lead.source,
       snippet: lead.snippet,
+      decisionMakers: site?.decisionMakers?.length ? site.decisionMakers : undefined,
     }
 
     return NextResponse.json({ enriched })

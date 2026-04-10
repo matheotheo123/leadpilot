@@ -78,16 +78,24 @@ export async function POST(request: NextRequest) {
       ? `site:crunchbase.com/organization ${targets[0]} ${location}`
       : `site:crunchbase.com/organization ${targets[0]}`
 
-    // ── 4. Google Maps — local businesses ────────────────────────────────
+    // ── 4. Direct company websites — About pages ──────────────────────────
+    // inurl:about / intitle:about returns actual company sites, not aggregators.
+    // Excluding noise sources focuses results on real operating businesses.
+    const directQuery = location
+      ? `"${targets[0]}" "${location}" inurl:about -site:linkedin.com -site:indeed.com -site:glassdoor.com -site:yelp.com -site:facebook.com -site:clutch.co`
+      : `"${targets[0]}" inurl:about -site:linkedin.com -site:indeed.com -site:glassdoor.com -site:yelp.com -site:facebook.com`
+
+    // ── 5. Google Maps — local businesses ────────────────────────────────
     const mapsPromises = location
       ? targets.slice(0, 3).map((t) => serperPlaces(t, location, 15))
       : []
 
     // Fire all in parallel
-    const [liResults, clutchResults, cbResults, mapsResults] = await Promise.all([
+    const [liResults, clutchResults, cbResults, directResults, mapsResults] = await Promise.all([
       Promise.allSettled(linkedInQueries.map((q) => serperSearch(q, 10))),
       Promise.allSettled(clutchQueries.map((q) => serperSearch(q, 10))),
       serperSearch(cbQuery, 8).catch(() => null),
+      serperSearch(directQuery, 8).catch(() => null),
       Promise.allSettled(mapsPromises),
     ])
 
@@ -132,6 +140,21 @@ export async function POST(request: NextRequest) {
         const name = extractName(item.title)
         if (!name) continue
         add({ name, website: item.link, snippet: item.snippet, source: 'web' })
+      }
+    }
+
+    // Direct company About pages — real company websites, no aggregators
+    if (directResults) {
+      for (const item of directResults.organic || []) {
+        if (!item.link || shouldSkip(item.link)) continue
+        // Derive homepage from the about page URL
+        try {
+          const u = new URL(item.link)
+          const homepage = `${u.protocol}//${u.host}`
+          const name = extractName(item.title)
+          if (!name || name.length < 3) continue
+          add({ name, website: homepage, snippet: item.snippet, source: 'web' })
+        } catch { /* skip malformed */ }
       }
     }
 
