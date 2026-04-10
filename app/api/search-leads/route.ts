@@ -5,18 +5,33 @@ import type { RawLead, BusinessProfile } from '@/types'
 
 export const maxDuration = 30
 
-// Domains we want to ALLOW even though they look like aggregators — job postings on
-// company-owned subdomains are fine. We only skip pure job/review aggregators.
-const SKIP = [
-  'indeed.com', 'glassdoor.com', 'ziprecruiter.com', 'monster.com',
-  'facebook.com', 'twitter.com', 'x.com', 'wikipedia.org', 'youtube.com',
-  'reddit.com', 'quora.com', 'medium.com', 'substack.com',
-  'forbes.com', 'techcrunch.com', 'venturebeat.com', 'wired.com',
-  'crunchbase.com', 'angel.co', 'clutch.co', 'g2.com',
-  'capterra.com', 'bbb.org', 'yellowpages', 'yelp.com',
-  'mapquest.com', 'tripadvisor.com',
-]
-const shouldSkip = (url: string) => SKIP.some((d) => url.includes(d))
+// Only skip personal social pages and pure job aggregators.
+// We WANT: linkedin.com/company, clutch.co, crunchbase.com — these are company directories.
+function shouldSkip(url: string): boolean {
+  const skip = [
+    'linkedin.com/in/',       // personal profiles
+    'linkedin.com/jobs/',     // job listings
+    'linkedin.com/feed',
+    'linkedin.com/pulse',
+    'indeed.com', 'glassdoor.com', 'ziprecruiter.com', 'monster.com',
+    'facebook.com', 'twitter.com', 'x.com', 'wikipedia.org',
+    'youtube.com', 'reddit.com', 'quora.com', 'medium.com', 'substack.com',
+    'forbes.com', 'techcrunch.com', 'venturebeat.com', 'wired.com',
+    'inc.com', 'businessinsider.com', 'entrepreneur.com',
+    'yelp.com', 'yellowpages', 'bbb.org', 'mapquest.com', 'tripadvisor.com',
+  ]
+  return skip.some((d) => url.includes(d))
+}
+
+function extractName(title: string): string {
+  return title
+    .replace(/\s*[|–·]\s*LinkedIn$/i, '')
+    .replace(/\s*[|–·]\s*Clutch\.co$/i, '')
+    .replace(/\s*[|–·]\s*Crunchbase$/i, '')
+    .replace(/\s*[-|–·]\s*.+$/, '')
+    .replace(/^(Top|Best|Leading)\s+/i, '')
+    .trim()
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -27,107 +42,132 @@ export async function POST(request: NextRequest) {
       ? profile.targets
       : ['technology company', 'software startup', 'SaaS company']
 
-    const roles: string[] = profile?.roles?.length
-      ? profile.roles
-      : []
-
     const seen = new Set<string>()
     const pool: RawLead[] = []
 
     const add = (r: Partial<RawLead> & { name: string; source: 'web' | 'maps' }) => {
       const key = r.name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 30)
-      if (!key || key.length < 2 || seen.has(key)) return
+      if (!key || key.length < 3 || seen.has(key)) return
+      // Reject obviously huge companies from snippet
+      const snip = (r.snippet || '').toLowerCase()
+      if (/\b(10,000|50,000|100,000|\d{2},\d{3})\s*(employees|staff|\+)/i.test(snip)) return
       seen.add(key)
       pool.push(r as RawLead)
     }
 
-    // ── Strategy 1: Hiring signal search ───────────────────────────────
-    // Find companies actively posting jobs that signal they have the pain.
-    // Search company career pages directly — NOT aggregators.
-    // "operations coordinator" job opening Ottawa -site:indeed.com -site:linkedin.com
-    const hiringQueries = roles.slice(0, 3).map((role) => {
-      const base = `"${role}" job opening`
-      const loc = location ? ` ${location}` : ''
-      return `${base}${loc} -site:indeed.com -site:glassdoor.com -site:linkedin.com -site:ziprecruiter.com`
-    })
-
-    // ── Strategy 2: Direct company search ──────────────────────────────
-    // Find company homepages by type — a reliable fallback that always returns results
-    const directQueries = targets.slice(0, 2).map((t) =>
-      location ? `${t} ${location}` : t
+    // ── 1. LinkedIn company pages ─────────────────────────────────────────
+    // These are real company profiles — snippet includes employee count & industry.
+    // "51-200 employees" in the snippet = perfect mid-size target.
+    const linkedInQueries = targets.slice(0, 2).map((t) =>
+      location
+        ? `site:linkedin.com/company "${t}" "${location}"`
+        : `site:linkedin.com/company "${t}"`
     )
 
-    // ── Strategy 3: Google Maps for local businesses ────────────────────
+    // ── 2. Clutch.co — curated verified B2B company directory ─────────────
+    // Clutch only lists real mid-size service companies — no noise, no blogs.
+    const clutchQueries = targets.slice(0, 2).map((t) =>
+      location
+        ? `site:clutch.co "${t}" "${location}"`
+        : `site:clutch.co "${t}"`
+    )
+
+    // ── 3. Crunchbase — funded/growing companies ──────────────────────────
+    // Series A/B companies have budget, are scaling, and aren't giant yet.
+    const cbQuery = location
+      ? `site:crunchbase.com/organization ${targets[0]} ${location}`
+      : `site:crunchbase.com/organization ${targets[0]}`
+
+    // ── 4. Google Maps — local businesses ────────────────────────────────
     const mapsPromises = location
-      ? targets.slice(0, 2).map((t) => serperPlaces(t, location, 10))
+      ? targets.slice(0, 3).map((t) => serperPlaces(t, location, 15))
       : []
 
-    // Run all in parallel
-    const [hiringResults, directResults, mapsResults] = await Promise.all([
-      Promise.allSettled(hiringQueries.map((q) => serperSearch(q, 8))),
-      Promise.allSettled(directQueries.map((q) => serperSearch(q, 8))),
+    // Fire all in parallel
+    const [liResults, clutchResults, cbResults, mapsResults] = await Promise.all([
+      Promise.allSettled(linkedInQueries.map((q) => serperSearch(q, 10))),
+      Promise.allSettled(clutchQueries.map((q) => serperSearch(q, 10))),
+      serperSearch(cbQuery, 8).catch(() => null),
       Promise.allSettled(mapsPromises),
     ])
 
     const errors: string[] = []
 
-    // Maps first — local businesses with phone numbers are highest value
+    // Maps — local businesses with phone/address (highest local intent)
     for (const res of mapsResults) {
       if (res.status === 'rejected') { errors.push(String(res.reason)); continue }
-      for (const place of res.value.places || []) {
-        if (!place.title) continue
-        add({ name: place.title, website: place.website, phone: place.phone, address: place.address, snippet: place.category, source: 'maps' })
+      for (const p of res.value.places || []) {
+        if (!p.title) continue
+        add({ name: p.title, website: p.website, phone: p.phone, address: p.address, snippet: p.category, source: 'maps' })
       }
     }
 
-    // Hiring signal results — company career pages
-    for (const res of hiringResults) {
+    // LinkedIn company pages
+    for (const res of liResults) {
       if (res.status === 'rejected') { errors.push(String(res.reason)); continue }
       for (const item of res.value.organic || []) {
-        if (!item.link || shouldSkip(item.link)) continue
-        const name = item.title.replace(/\s*[-|–·|:]\s*(job|career|hiring|join|work).*/i, '').replace(/\s*[-|–·]\s*.+$/, '').trim()
-        if (!name || name.length < 2) continue
+        if (!item.link?.includes('linkedin.com/company')) continue
+        const name = extractName(item.title)
+        if (!name) continue
+        // Store LinkedIn URL — enrich-lead will find their real website
         add({ name, website: item.link, snippet: item.snippet, source: 'web' })
       }
     }
 
-    // Direct company results — homepage fallback
-    for (const res of directResults) {
+    // Clutch.co company listings
+    for (const res of clutchResults) {
       if (res.status === 'rejected') { errors.push(String(res.reason)); continue }
       for (const item of res.value.organic || []) {
-        if (!item.link || shouldSkip(item.link)) continue
-        const name = item.title.replace(/\s*[-|–·]\s*.+$/, '').trim()
-        if (!name || name.length < 2) continue
+        if (!item.link?.includes('clutch.co')) continue
+        const name = extractName(item.title)
+        if (!name) continue
+        add({ name, website: item.link, snippet: item.snippet, source: 'web' })
+      }
+    }
+
+    // Crunchbase — funded companies
+    if (cbResults) {
+      for (const item of cbResults.organic || []) {
+        if (!item.link?.includes('crunchbase.com/organization')) continue
+        const name = extractName(item.title)
+        if (!name) continue
         add({ name, website: item.link, snippet: item.snippet, source: 'web' })
       }
     }
 
     if (pool.length === 0) {
-      const reason = errors[0] || 'No results returned from Serper'
-      return NextResponse.json({ error: reason }, { status: 422 })
+      return NextResponse.json(
+        { error: errors[0] || 'No companies found. Check your SERPER_API_KEY has remaining quota.' },
+        { status: 422 }
+      )
     }
 
-    // ── DeepSeek picks the 5 best prospects ────────────────────────────
-    // Quality over quantity — 5 deeply enriched leads beats 25 shallow ones
+    // ── DeepSeek picks the 5 best — strict mid-size filter ───────────────
     let finalLeads: RawLead[] = pool.slice(0, 5)
 
     if (pool.length > 5 && profile) {
       try {
         const listText = pool
-          .slice(0, 20)
+          .slice(0, 25)
           .map((r, i) => `[${i}] ${r.name} | ${r.snippet || ''} | ${r.address || r.website || ''}`)
           .join('\n')
 
         const filter = await deepseekJSON<{ kept: number[] }>(
-          'You are a B2B sales qualifier. Be strict — only keep genuine mid-size companies (50-500 employees) that are clearly businesses, not blogs or directories.',
+          'You are a strict B2B sales qualifier.',
           `Vendor sells: ${profile.sells?.join(', ')}
+Ideal buyer: ${profile.idealCustomer}
 Pain solved: ${profile.painPoints?.slice(0, 2).join(', ')}
 
-These are candidates. Pick the 5 BEST — actual companies that could realistically hire this vendor:
+Pick the 5 BEST prospects from this list. Rules:
+- Must be a real operating company (not a blog, news article, directory listing, or government org)
+- Must be mid-size: 10-500 employees (reject anything that looks like a Fortune 500 or 1-person shop)
+- Must plausibly need what the vendor sells based on their industry/description
+- Prefer companies with specific descriptions over generic ones
 
+Candidates:
 ${listText}
 
-Return JSON: { "kept": [5 index numbers, best prospects only] }`
+Return JSON: { "kept": [exactly 5 index numbers] }`
         )
 
         if (Array.isArray(filter?.kept) && filter.kept.length > 0) {
@@ -139,7 +179,13 @@ Return JSON: { "kept": [5 index numbers, best prospects only] }`
       }
     }
 
-    return NextResponse.json({ leads: finalLeads })
+    // Maps leads first, then web
+    const sorted = [
+      ...finalLeads.filter((l) => l.source === 'maps'),
+      ...finalLeads.filter((l) => l.source === 'web'),
+    ]
+
+    return NextResponse.json({ leads: sorted })
   } catch (err) {
     console.error('search-leads error:', err)
     return NextResponse.json(

@@ -16,81 +16,95 @@ interface EnrichResult {
   outreachBlueprint: string
 }
 
+const DIRECTORIES = ['linkedin.com', 'clutch.co', 'crunchbase.com', 'g2.com', 'capterra.com']
+const isDirectoryUrl = (url: string) => DIRECTORIES.some((d) => url.includes(d))
+
 export async function POST(request: NextRequest) {
   try {
     const { lead, businessProfile }: { lead: EnrichedLead; businessProfile: BusinessProfile } =
       await request.json()
 
-    // Run website crawl and job posting search in parallel
-    const [siteResult, jobsResult] = await Promise.allSettled([
-      lead.website ? crawlWebsite(lead.website) : Promise.resolve(null),
-      serperSearch(
-        `"${lead.name}" (hiring OR "open roles" OR "we're hiring" OR careers OR jobs)`,
-        5
-      ),
+    // If the lead URL is a directory (LinkedIn, Clutch, Crunchbase),
+    // find their actual company website first — we can't crawl directories.
+    let actualWebsite = lead.website
+    if (lead.website && isDirectoryUrl(lead.website)) {
+      try {
+        const siteSearch = await serperSearch(
+          `"${lead.name}" official website -site:linkedin.com -site:clutch.co -site:crunchbase.com`,
+          5
+        )
+        const hit = siteSearch.organic?.find(
+          (r) => !isDirectoryUrl(r.link) && !r.link.includes('wikipedia') && !r.link.includes('facebook')
+        )
+        if (hit) actualWebsite = hit.link
+      } catch { /* keep original */ }
+    }
+
+    // Run website crawl + news search in parallel
+    const [siteResult, newsResult] = await Promise.allSettled([
+      actualWebsite ? crawlWebsite(actualWebsite) : Promise.resolve(null),
+      serperSearch(`"${lead.name}" company news announcement 2024 2025`, 4),
     ])
 
     const site = siteResult.status === 'fulfilled' ? siteResult.value : null
-    const jobSnippets =
-      jobsResult.status === 'fulfilled'
-        ? jobsResult.value.organic
-            ?.slice(0, 4)
+    const news =
+      newsResult.status === 'fulfilled'
+        ? newsResult.value.organic
+            ?.slice(0, 3)
             .map((r) => `${r.title}: ${r.snippet}`)
             .join('\n')
         : null
 
     const crawledEmail = site?.emails?.[0] ?? null
 
+    // Build context from everything we know
     const context = [
       `COMPANY: ${lead.name}`,
-      lead.website ? `WEBSITE: ${lead.website}` : null,
-      lead.address ? `ADDRESS: ${lead.address}` : null,
-      lead.phone ? `PHONE: ${lead.phone}` : null,
-      lead.snippet ? `SEARCH SNIPPET: ${lead.snippet}` : null,
-      site ? `\nWEBSITE TITLE: ${site.title}` : null,
-      site?.description ? `META DESCRIPTION: ${site.description}` : null,
-      site?.h1s.length ? `HEADLINES: ${site.h1s.join(' | ')}` : null,
-      site?.techMentions.length ? `TECH STACK: ${site.techMentions.join(', ')}` : null,
-      site ? `SITE CONTENT: ${site.bodyText.slice(0, 1800)}` : null,
-      site?.emails.length ? `EMAILS FOUND: ${site.emails.join(', ')}` : null,
-      jobSnippets ? `\nACTIVE JOB POSTINGS FOUND:\n${jobSnippets}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n')
+      actualWebsite ? `WEBSITE: ${actualWebsite}` : null,
+      lead.address   ? `ADDRESS: ${lead.address}`   : null,
+      lead.phone     ? `PHONE: ${lead.phone}`       : null,
+      lead.snippet   ? `DIRECTORY DESCRIPTION: ${lead.snippet}` : null,
+      site?.title         ? `\nWEBSITE TITLE: ${site.title}`                         : null,
+      site?.description   ? `META DESCRIPTION: ${site.description}`                  : null,
+      site?.h1s?.length   ? `HEADLINES: ${site.h1s.join(' | ')}`                     : null,
+      site?.techMentions?.length ? `TECH STACK DETECTED: ${site.techMentions.join(', ')}` : null,
+      site?.bodyText      ? `SITE CONTENT: ${site.bodyText.slice(0, 1800)}`          : null,
+      site?.emails?.length ? `EMAILS ON SITE: ${site.emails.join(', ')}`             : null,
+      news ? `\nRECENT NEWS / ANNOUNCEMENTS:\n${news}` : null,
+    ].filter(Boolean).join('\n')
 
     const analysis = await deepseekJSON<EnrichResult>(
-      `You are an elite B2B sales intelligence analyst. Your job is to analyze a prospect company and determine whether they genuinely need a specific service, using concrete evidence from their website and job postings.`,
+      `You are a B2B sales intelligence analyst. Assess whether this company genuinely needs the vendor's service. Be evidence-based and specific.`,
       `VENDOR SELLS: ${businessProfile.sells?.join(', ')}
 PAIN POINTS SOLVED: ${businessProfile.painPoints?.join(', ')}
-TARGET ROLES (job titles that signal the need): ${businessProfile.roles?.join(', ')}
+IDEAL CUSTOMER: ${businessProfile.idealCustomer}
 
 PROSPECT DATA:
 ${context}
 
-Analyze this prospect and return JSON:
+Return JSON:
 {
-  "score": <0-100 integer. 80+ only if there is CONCRETE evidence like matching job postings, relevant tech stack, or clear operational scale. Be strict.>,
-  "industry": "<specific industry>",
-  "email": "<best contact email or null>",
+  "score": <0-100. Be strict: 75+ requires real evidence like matching tech stack, relevant scale signals, or specific news. Don't give high scores speculatively.>,
+  "industry": "<specific industry, e.g. 'B2B SaaS — HR Tech' not just 'Technology'>",
+  "email": "<best contact email found, or null>",
   "companySize": "<startup|smb|mid-market|enterprise>",
   "painSignals": [
     {
-      "signal": "<specific evidence — e.g. 'Hiring 3 Operations Coordinators (role vendor replaces)' or 'AWS mentioned across 4 job postings'>",
+      "signal": "<specific observable evidence — cite actual content from their site or news, not guesses>",
       "urgency": "<high|medium|low>",
       "type": "<hiring|cost|growth|tech|news|funding>"
     }
   ],
-  "whyNow": "<2 sentences. Must cite specific evidence from their job postings or site. Why is RIGHT NOW the moment to reach out?>",
-  "outreachBlueprint": "<2-3 sentence cold opener. Reference a specific job posting or observable fact about them. Sound human, not salesy. Open a conversation, don't pitch.>"
-}
-
-Score guidance: 80-100 = job postings directly match target roles OR clear evidence of pain. 60-79 = indirect signals. Below 60 = speculative. If no evidence found, score 30-45.`
+  "whyNow": "<2 sentences grounded in specific evidence. What makes this the right moment to reach out?>",
+  "outreachBlueprint": "<2-3 sentence cold opener. Mention something specific about their business. Sound like a human who did research, not a template.>"
+}`
     )
 
     const enriched: EnrichedLead = {
       id: Math.random().toString(36).slice(2, 10),
       name: lead.name,
-      website: lead.website,
+      // Show the real website if we found one, fall back to directory URL
+      website: (actualWebsite !== lead.website ? actualWebsite : lead.website),
       phone: lead.phone,
       email: analysis.email || crawledEmail || undefined,
       address: lead.address,
@@ -108,6 +122,9 @@ Score guidance: 80-100 = job postings directly match target roles OR clear evide
     return NextResponse.json({ enriched })
   } catch (err) {
     console.error('enrich-lead error:', err)
-    return NextResponse.json({ error: `Enrichment failed: ${err instanceof Error ? err.message : String(err)}` }, { status: 500 })
+    return NextResponse.json(
+      { error: `Enrichment failed: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 500 }
+    )
   }
 }
